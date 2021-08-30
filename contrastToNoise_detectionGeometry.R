@@ -28,44 +28,6 @@ optimise_range <- c(-30, 30)
 
 #-------------------------------- Functions -----------------------------------#
 
-# Calculate the signal detected as a function of psi and beta, the function only
-# applies where beta + psi < 90deg
-intensityAnl <- function(psi, beta) 0.25*pi*cos(psi)*(1 - cos(2*beta) )
-
-# Cosine of the angle to the surface normal
-cosChi <- function(theta, phi, psi, beta) {
-    dDotn <- cos(theta)*(sin(psi)*tan(theta)*cos(phi) + cos(psi))
-    result <- if_else(dDotn < 0, 0, dDotn)
-    return(result)
-}
-
-# Calculate the intensity where the analytic formula cannot be applied.
-intensityInt <- function(psi, beta) {
-    integrand <- function(theta, phi) sin(theta)*cosChi(theta, phi, psi, beta)
-    result <- quad2d(integrand, 0, beta, 0, pi)
-    return(result)
-}
-
-# Calculate the intensity using the analytic if possible and the integration if
-# not
-intensity <- function(psi, beta) {
-    psi <- psi*pi/180
-    beta <- beta*pi/180
-    result <- if_else(psi + beta > pi/2, intensityInt(psi, beta), intensityAnl(psi, beta))
-    return(result)
-}
-
-# Calculates the pumping through the aperture
-conductance_ap <- function(beta, working_dist) {
-    # Area of the aperture, cm^2
-    d <- working_dist/10
-    r <- d*sin(beta*pi/180)
-    
-    # Pumping through that aperture
-    C <- helium_factor*9.3*(2*r)^2
-    return(C)
-}
-
 # Contrast value from  a range of intensity values
 grad_contrsat <- function(ints, psi_range) {
     grads <- abs(diff(ints)/diff(psi_range))
