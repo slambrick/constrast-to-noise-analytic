@@ -17,11 +17,15 @@ library(tikzDevice) # Output graphics to TikZ for inclusion in LaTeX
 library(ggthemes)   # Additional themes for ggplot, has solarized colour scheme
                     # for discrete plots
 library(viridis)    # Good continous colour scheme
-library("heliumApertureIntensity")
+library(devtools)
+load_all("../heliumApertureIntensity")
 ```
 
 
 # Analysis functions
+
+These functions are not used apart from in the pumping section, and they don't
+seem to do much.
 
 ```{r}
 # Get the standard deviation from the other data
@@ -61,6 +65,11 @@ present_half_cone <- 10
 
 # The present working distance
 present_working_dist <- 3
+
+# Do saving to .tex files
+save_tex <- FALSE
+# Do saving to .eps/.pdf files
+save_plots <- FALSE
 ```
 
 
@@ -70,43 +79,46 @@ present_working_dist <- 3
 ## Create data
 
 Create a data frmae for all values of $\psi$ and $\varphi$, then calculate the
-detected signal level for those parameters.
+detected signal level for those parameters. The signal levels are normalised
+such that a 45deg surface angle and 5deg half cone angle is equal to 1.
+
+If the data has previously been calculated it can be imported instead.
 
 ```{r}
-# Range of beta
-betas <- seq(beta_range[1], beta_range[2], by = 1)
-
-# Range of psi
-psis <- seq(psi_range[1], psi_range[2], by = 1)
-
-# Overall data frame
-df_signal <- tibble(beta = NA, I = NA, psi = NA)
-
-for (i in seq(1, length(betas))) {
-    Is <- rep(0, length(psis))
-    for (j in seq(1, length(psis))) {
-        Is[j] <- intensityCircular(psis[j]*pi/180, betas[i]*pi/180)
+if (FALSE) {
+    # Range of beta
+    betas <- seq(beta_range[1], beta_range[2], by = 1)
+    
+    # Range of psi
+    psis <- seq(psi_range[1], psi_range[2], by = 1 )
+    
+    # Overall data frame
+    df_signal <- tibble(beta = NA, I = NA, psi = NA)
+    
+    for (i in seq(1, length(betas))) {
+        Is <- rep(0, length(psis))
+        for (j in seq(1, length(psis))) {
+            Is[j] <- intensityCircular(psis[j]*pi/180, betas[i]*pi/180)
+        }
+        df_signal <- bind_rows(df_signal, tibble(psi = psis, beta = betas[i], I = Is))
     }
-    df_signal <- bind_rows(df_signal, tibble(psi = psis, beta = betas[i], I = Is))
+    
+    # Remove the first row that are NA's
+    df_signal <- df_signal[-1,]
+    
+    # Normalise the signals such that 1 corresponds to a 45deg surface angle and a
+    # 5deg half cone angle, i.e. the current level of signal
+    N <- df_signal %>% filter(beta == 5, psi == 45)
+    df_signal %<>% mutate(I = I/N[["I"]])
+    
+    # Save the basic data frame to a text file
+    df_signal %>% write_csv("aperture_signal_data.csv")
+} else {
+    #As the calculation takes a minute an alternative is to import previously
+    #calculated data.
+    
+    df_signal <- read_csv("aperture_signal_data.csv", show_col_types = FALSE)
 }
-
-# Remove the first row that are NA's
-df_signal <- df_signal[-1,]
-
-# Normalise the signals such that 1 corresponds to a 45deg surface angle and a
-# 5deg half cone angle, i.e. the current level of signal
-N <- df_signal %>% filter(beta == 5, psi == 45)
-df_signal %<>% mutate(I = I/N[["I"]])
-
-# Save the basic data frame to a text file
-df_signal %>% write_csv("aperture_signal_data.csv")
-```
-
-As the calculation takes a minute an alternative is to import previously
-calculated data.
-
-```{r}
-df_signal <- read_csv("aperture_signal_data.csv", show_col_types = FALSE)
 ```
 
 
@@ -137,6 +149,42 @@ plt_contour <- df_signal %>%
 
 print(plt_contour)
 ```
+
+For the paper we compare the intensity change across $\psi$ for two different 
+aperture sizes in order to demonstrate the extension of contrast due to partial
+masking.
+
+```{r, fig.width=3.287, fig.height=2.2}
+df1 <- df_signal %>% filter(beta == 10) %>% mutate(I = I/max(I))
+df2 <- df_signal %>% filter(beta == 45) %>% mutate(I = I/max(I))
+df3 <- bind_rows(df1, df2)
+df3 %<>% mutate(beta = as.factor(beta))
+
+plt_options <- df3 %>% ggplot(aes(x = psi, y = I, colour = beta)) + 
+  geom_line(linewidth=1) + 
+#  scale_fill_manual(values = as.factor(c(10, 45)), labels = c(expression('10'*degree), expression('45'*degree))) +
+  scale_colour_colorblind(name = 'β') + 
+  labs(x = expression(psi*'/'*degree), y="Normalised intensity") +
+  theme(legend.position = c(0.87, 0.73),
+        text = element_text(size = 9),
+        aspect.ratio = 2/(1+sqrt(5)))
+plt_options
+```
+
+```{r}
+if (save_tex) {
+    plt_options <- plt_options + 
+        xlab("$\\psi/^\\circ$") +
+      scale_colour_colorblind(name = '$\\beta$')
+      
+    tikz("C:/Users/SamLambrick/Documents/SMF_research_work/figure_making_reports/constrast-to-noise-analytic/signal_aperture_size_line.tex", standAlone = FALSE, width = 3.278, height = 2.2)
+    print(plt_options)
+    dev.off()
+}
+```
+
+Assuming shot noise the signal to noise ratio can be plotted as well: it is
+simply the square route of the signal.
 
 ```{r, fig.width=2.354, fig.height=5}
 # Plot of the signal to noise ratio as a contour plot and heatmap
@@ -184,38 +232,45 @@ print(plt_radius)
 Save the contour plots as vector graphics (`.eps`) and as raster graphics (`.png`).
 
 ```{r}
-ggsave("signal_aperture.eps", plt_contour, width = 2.354, height = 5)
-ggsave("SNR_aperture.eps", plt_contour_SNR, width = 2.354, height = 5)
-
-ggsave("signal_aperture.png", plt_contour, width = 2.354, height = 5)
-ggsave("SNR_aperture.png", plt_contour_SNR, width = 2.354, height = 5)
-
-ggsave("signal_aperture_mm.eps", plt_radius, width = 3, height = 2)
-ggsave("signal_aperture_mm.png", plt_radius, width = 3, height = 2)
+if (save_plots) {
+    ggsave("signal_aperture.eps", plt_contour, width = 2.354, height = 5)
+    ggsave("SNR_aperture.eps", plt_contour_SNR, width = 2.354, height = 5)
+    
+    ggsave("signal_aperture.png", plt_contour, width = 2.354, height = 5)
+    ggsave("SNR_aperture.png", plt_contour_SNR, width = 2.354, height = 5)
+    
+    ggsave("signal_aperture_mm.eps", plt_radius, width = 3, height = 2)
+    ggsave("signal_aperture_mm.png", plt_radius, width = 3, height = 2)
+    
+    ggsave("C:/Users/SamLambrick/Documents/SMF_research_work/figure_making_reports/constrast-to-noise-analytic/signal_aperture_size_line.eps", plt_options, width = 3.287, height = 2.6)
+    ggsave("C:/Users/SamLambrick/Documents/SMF_research_work/figure_making_reports/constrast-to-noise-analytic/signal_aperture_size_line.png", plt_options, width = 3.287, height = 2.6)
+}
 ```
 
 Export the contour plots as `.tex` files for improting into my thesis.
 
 ```{r message=FALSE, warning=FALSE}
-plt_contour <- plt_contour + 
-    xlab("Half cone angle/$^\\circ$") +
-    ylab("Surface angle/$^\\circ$") +
-    theme(text = element_text(size = 9))
-tikz("2Dplot.tex", standAlone = FALSE, width = 2.354, height = 5)
-print(plt_contour)
-dev.off()
+if (save_tex) {
+    plt_contour <- plt_contour + 
+        xlab("Half cone angle/$^\\circ$") +
+        ylab("Surface angle/$^\\circ$") +
+        theme(text = element_text(size = 9))
+    tikz("2Dplot.tex", standAlone = FALSE, width = 2.354, height = 5)
+    print(plt_contour)
+    dev.off()
+        
+    plt_contour_SNR <- plt_contour_SNR + 
+        xlab("Half cone angle/$^\\circ$") +
+        ylab("Surface angle/$^\\circ$") +
+        theme(text = element_text(size = 9))
+    tikz("2Dplot_SNR.tex", standAlone = FALSE, width = 2.354, height = 5)
+    print(plt_contour_SNR)
+    dev.off()
     
-plt_contour_SNR <- plt_contour_SNR + 
-    xlab("Half cone angle/$^\\circ$") +
-    ylab("Surface angle/$^\\circ$") +
-    theme(text = element_text(size = 9))
-tikz("2Dplot_SNR.tex", standAlone = FALSE, width = 2.354, height = 5)
-print(plt_contour_SNR)
-dev.off()
-
-tikz("signal_aperture_mm.tex", standAlone = FALSE, width = 3, height = 2)
-print(plt_radius)
-dev.off()
+    tikz("signal_aperture_mm.tex", standAlone = FALSE, width = 3, height = 2)
+    print(plt_radius)
+    dev.off()
+}
 ```
 
 
@@ -265,7 +320,7 @@ angle as the current design and one with double the solid angle.
 current_omega <- omegaEllipseBeta(10*pi/180, 10*pi/180)
 
 # Range of angles in one of the dimensions
-beta_a <- c(1.5, 2.5, 5, 10)
+beta_a <- c(2, 3, 5, 10)
 
 # Calculate the  values of the other half cone angle
 beta_b <- rep(0, length(beta_a))
@@ -319,7 +374,7 @@ plt_elliptical <- df_elliptical %>%
     scale_color_colorblind() +
     labs(x = "$\\psi^\\circ$", y = "Relative signal") + 
     guides(colour=guide_legend(nrow=1)) +
-    scale_x_continuous(breaks = c(0,20,40,60,80,90))
+    scale_x_continuous(breaks = c(0,20,40,60,80,90)) +
     xlim(0, 90) +
     ylim(c(0, 1)) +
     theme(legend.position = "top", 
@@ -336,52 +391,56 @@ used.
 
 ### MC test
 
+Test the implemented Monte-Carlo methods against the quadrature integration method where they can both be applied (where partial masking does not occur). 
+
 ```{r}
 psi <- seq(0, 110)
 I <- rep(0, length(psi))
 IMC <- rep(0, length(psi))
 for (i in seq(1, length(psi))) {
     I[i] <- intensityElliptical(psi[i]*pi/180, 10*pi/180, 10*pi/180)
-    IMC[i] <- intensityEllipticalMC(psi[i]*pi/180, 10*pi/180, 10*pi/180, 300000)
+    IMC[i] <- intensityEllipticalMC(psi[i]*pi/180, 10*pi/180, 10*pi/180, 100000)
 }
-df_elliptical <- tibble(psi=psi, Int=I/max(I), MC=IMC/max(IMC))
+df_elliptical_tmp <- tibble(psi=psi, Int=I/max(I), MC=IMC/max(I))
 ```
 
 ```{r}
-df_elliptical %>% pivot_longer(!psi, names_to = "Model", values_to = "signal") %>%
+df_elliptical_tmp %>% pivot_longer(!psi, names_to = "Model", values_to = "signal") %>%
     ggplot(aes(x=psi, y=signal, colour=Model)) + 
     geom_line() + 
     scale_colour_colorblind() +
     ylim(0, 1)
 ```
 
-The test shows that the models agree. Now 
+The test shows that the models agree. Now either calculate or import the 
+data for "long" apertuers where significant partial masking occurs.
 
 ```{r}
-df_elliptical2 <- tibble(beta_a=NA, beta_b=NA, psi=NA, I=NA)
-psis <- seq(0, 135, by=1.5)
-for (i in seq(1, length(beta_a))) {
-    Is <- rep(0, length(psis))
-    for (j in seq(1, length(Is))) {
-        Is[j] <- intensityEllipticalMC(psis[j]*pi/180, beta_b[i]*pi/180, beta_a[i]*pi/180, 10000000)
+if (FALSE) {
+    df_elliptical2 <- tibble(beta_a=NA, beta_b=NA, psi=NA, I=NA)
+    psis <- seq(0, 135, by=1.5)
+    for (i in seq(1, length(beta_a))) {
+        Is <- rep(0, length(psis))
+        for (j in seq(1, length(Is))) {
+            Is[j] <- intensityEllipticalMC(psis[j]*pi/180, beta_b[i]*pi/180, beta_a[i]*pi/180, 10000000)
+        }
+        df_elliptical2 <- bind_rows(df_elliptical2, tibble(psi=psis, beta_a=beta_a[i], 
+                                                         beta_b=beta_b[i], I = Is))
     }
-    df_elliptical2 <- bind_rows(df_elliptical2, tibble(psi=psis, beta_a=beta_a[i], 
-                                                     beta_b=beta_b[i], I = Is))
+    
+    # Remove the first row that are NA's
+    df_elliptical2 <- df_elliptical2[-1,]
+    
+    df_elliptical2 %<>% mutate(aspect_ratio = beta_b/beta_a)
+    
+    df_elliptical2 %>% write_csv("elliptical_long_data.csv")
+} else {
+    # Alternativly load the data from a data file because the computation takes time.
+    df_elliptical2 <- read_csv("elliptical_long_data.csv", show_col_types = FALSE)
 }
-
-# Remove the first row that are NA's
-df_elliptical2 <- df_elliptical2[-1,]
-
-df_elliptical2 %<>% mutate(aspect_ratio = beta_b/beta_a)
-
-df_elliptical2 %>% write_csv("elliptical_long_data.csv")
 ```
 
-Alternativly load the data from a data file because the computation takes time.
-
-```{r}
-df_elliptical2 <- read_csv("elliptical_long_data.csv")
-```
+Plot of the 'long' apertures.
 
 ```{r, fig.width=2.354, fig.height=2.6}
 plt_elliptical2 <- df_elliptical2 %>% 
@@ -391,7 +450,7 @@ plt_elliptical2 <- df_elliptical2 %>%
     #geom_line() + 
     geom_smooth(method = "loess", se=FALSE, span=0.2) + 
     scale_colour_colorblind() +
-    labs(x = "\\psi/^\\circ", y = "Relative signal") +
+    labs(x = "$\\psi/^\\circ$", y = "Relative signal") +
     ylim(c(0, 1)) +
     theme(legend.position = "top", 
           legend.title = element_blank(), 
@@ -400,18 +459,57 @@ plt_elliptical2 <- df_elliptical2 %>%
 print(plt_elliptical2)
 ```
 
+### Plot for paper
+
+This is a combination of both the long and wide apertures in a single figures for use in the paper.
+
+```{r, fig.width=3.287, fig.height=4.5}
+df_ell <-  bind_rows(Wide = df_elliptical, Long = df_elliptical2, .id = 'Type')
+N <- max(df_ell['I'])
+
+plt_ell <- df_ell %>% mutate(aspect_ratio = as_factor(round(aspect_ratio))) %>%
+    ggplot(aes(x = psi, y = I/N, colour = aspect_ratio)) + 
+    geom_smooth(method = "loess", se=FALSE, span=0.2, linewidth=1) + 
+    facet_wrap(~Type, ncol = 1) + 
+    scale_colour_colorblind(name = "Aspect ratio") +
+    labs(x = "$\\psi/^\\circ$", y = "Relative signal") +
+    ylim(c(0, 1)) +
+    theme(legend.position = "top", 
+          #legend.title = element_blank(), 
+          text = element_text(size = 9),
+          aspect.ratio = 2/(1+sqrt(5)))
+
+plt_ell
+```
+
 ## Save elliptical plots
 
 There are two plots, one for "wide" apertures and the other for "long"
 apertures.
 
+```{r}
+if (save_tex) {
+    tikz("C:/Users/SamLambrick/Documents/SMF_research_work/figure_making_reports/constrast-to-noise-analytic/elliptical_apertures.tex", standAlone = FALSE, width = 3.287, height = 4.5)
+    print(plt_ell)
+    dev.off()
+}
+```
+
 # Analyse contrast
 
-Caculate both the RMS contrast to noise and the differential contrast to noise
-for each value of beta
+## RMS and differential contrast to noise
+
+Calculate both the RMS contrast to noise and the differential contrast to noise
+for each value of beta. We use the 'standard SHeM configuration' of $\beta=10^\circ$
+to normalise to 1.
+
+Also calculate the equivalent signal increase assuming shot noise.
 
 ```{r}
-# Calculate the standard deviation contrast and noise for each value of beta
+beta_range <- c(0, 90)
+betas <- seq(beta_range[1], beta_range[2], by = 1)
+
+# Calculate the standard deviation and differential contrast for each value of beta
 df_sigma <- tibble(beta = NA, contrast = NA, av = NA)
 df_diff <- tibble(beta = NA, contrast = NA, av = NA)
 for (i in seq(1, length(betas))) {
@@ -446,7 +544,16 @@ df_contrast <- bind_rows("sigma" = df_sigma, "diff" = df_diff, .id = "method")
 
 # Add the equivalent signal increase
 df_contrast %<>% mutate(signal_increase = CNR^2)
+```
 
+
+We also consider 3 pairs of angles in order to calculate the difference to noise
+for those specific angles: 
+ - $(0^\circ,45^\circ)$
+ - $(0^\circ,90^\circ)$
+ - $(45^\circ,90^\circ)$
+
+```{r}
 # Calculate the Contrast to noise and difference to noise between 0/45, 0/90, 
 # 45/90, for each beta
 df_difference <- tibble(beta = NA, CNR = NA, I_0_45 = NA, I_0_90 = NA, 
@@ -480,79 +587,60 @@ df_difference %<>% mutate(
 )
 ```
 
-#--------------------------------- Pumping ------------------------------------#
+### Create plots
 
-```{r}
-# # Data frame
-# df_pumping <- tibble(beta = rep(betas, times = length(working_dists)),
-#                      working_dist = rep(working_dists, each = length(betas)))
-# 
-# # Calculate the pumping for each 
-# df_pumping %<>% mutate(pumping = conductance_ap(beta, working_dist))
-#                      
-# # Calculate the standard deviation and the RMS contrast to noise
-# df_pumping %<>% mutate(
-#     sigma = df_contrast %>% sigma_calc(beta),
-#     av = df_contrast %>% av_calc(beta)
-# )
-# df_pumping %<>% mutate(
-#     sigma = sigma*pump_ion/(pump_ion + pumping),
-#     av = av*pump_ion/(pump_ion + pumping),
-#     CNR_sigma = sigma/sqrt(av)
-# )
-# 
-# # Normalise such that a value of 1 is the present aperture size
-# N <- (df_pumping %>% filter(beta == present_half_cone, 
-#     abs(working_dist - present_working_dist) < 0.0001))[["CNR_sigma"]]
-# df_pumping %<>% mutate(CNR_sigma = CNR_sigma/N)
-# 
-# # Add the equivalent signal increase
-# df_pumping %<>% mutate(signal_increase = CNR_sigma^2)
-```
+Plot the contast, CNR, and the equivalent signal increase. 
 
-#----------------------------------- Plot -------------------------------------#
-
-```{r}
+```{r, fig.width=3.287, fig.height=4}
 
 # Plot of the RMS contrst to noise and the standard deviation
 facet_names <- c(
-    'CNR'="Contrast to noise",
-    'contrast'="Contrast"
+    'CNR'="RMS contrast to noise",
+    'contrast'="RMS contrast"
 )
 leg_labs <- list(
     'sigma'="RMS",
     'diff'="Differential"
 )
+cs = colorblind_pal()(4)
+
 plt_CNR_sig <- df_contrast %>%
     gather(key = "variable", value = "value", -beta, -av, -method, -signal_increase) %>%
-    ggplot(aes(x = beta, y = value, colour = method)) +
-    geom_line() + 
-    geom_vline(aes(xintercept = present_half_cone)) +
+    filter(method == "sigma") %>%
+    ggplot(aes(x = beta, y = value)) +
+    geom_line(colour = cs[3], linewidth=1) + 
+    geom_vline(aes(xintercept = present_half_cone), colour = cs[1],
+               linewidth=1) +
     scale_x_continuous(breaks = c(0,20,40,60,80)) +
-    scale_colour_manual(values = colorRampPalette(solarized_pal()(8))(2),
-                        labels = leg_labs)  +
-    facet_wrap( ~ variable, ncol = 2, scale = "free_y", 
+    facet_wrap( ~ variable, ncol = 1, scale = "free_y", 
                labeller = as_labeller(facet_names)) +
     xlab(expression("Half cone angle/"*degree)) + 
-    ylab(NULL) +
-    theme(aspect.ratio = 2/(1+sqrt(5)), legend.title = element_blank())
+    ylab("Normalised contrast") +
+    theme(aspect.ratio = 2/(1+sqrt(5)),
+          legend.position = "none",
+          text = element_text(size=9))
 
 print(plt_CNR_sig)
 
 # Plot the required signal increase
 plt_signal_increase <- df_contrast %>%
-    ggplot(aes(x = beta, y = signal_increase, colour = method)) +
-    geom_line() + 
-    geom_vline(aes(xintercept = present_half_cone)) +
+    filter(method == "sigma") %>%
+    ggplot(aes(x = beta, y = signal_increase)) +
+    geom_line(linewidth=1, , colour = cs[3]) + 
+    geom_vline(aes(xintercept = present_half_cone), linewidth=1,colour = cs[1]) +
     scale_x_continuous(breaks = c(0,20,40,60,80)) +
-    scale_colour_manual(values = colorRampPalette(solarized_pal()(8))(2),
-                        labels = leg_labs)  +
     xlab(expression("Half cone angle/"*degree)) + 
     ylab("Equivalent overall signal increase") +
-    theme(aspect.ratio = 2/(1+sqrt(5)), legend.title = element_blank())
+    theme(aspect.ratio = 2/(1+sqrt(5)),
+          legend.title = element_blank(),
+          text = element_text(size=9))
 
 print(plt_signal_increase)
+```
 
+And plot the 3 differences.
+
+```{r, fig.width=3.287, fig.height=2.8}
 # Plot the difference to noise and the difference
 leg_labs <- list(
     bquote(0^degree * "," ~ 45^degree), 
@@ -562,78 +650,233 @@ leg_labs <- list(
 plt_CNR_diff <- df_difference %>%
     gather(key = "pair", value = "value", -beta, -CNR) %>%
     ggplot(aes(x = beta, y = value, colour = pair)) + 
-    geom_line() +
+    geom_line(linewidth=1) +
     geom_vline(aes(xintercept = present_half_cone)) +
     scale_x_continuous(breaks = c(0,20,40,60,80)) +
-#    scale_colour_manual(values = colorRampPalette(solarized_pal()(8))(3), 
-#                        labels = leg_labs)  +
-    facet_wrap( ~ CNR, ncol = 2, scale = "free_y") +
+    scale_colour_colorblind(labels = leg_labs)  +
+    facet_wrap( ~ CNR, ncol = 1, scale = "free_y") +
     xlab(expression("Half cone angle/"*degree)) + 
     ylab(NULL) +
-    theme(legend.title = element_blank()) +
-    theme(aspect.ratio = 2/(1+sqrt(5)))
+    theme(legend.title = element_blank(),
+          text = element_text(size=9),
+          legend.position='top')
+
+plt_DNR <- df_difference %>% 
+    gather(key = "pair", value = "value", -beta, -CNR) %>%
+    filter(CNR == "DNR") %>%
+    ggplot(aes(x = beta, y = value, colour = pair)) +
+    geom_line(linewidth=1) +
+    geom_vline(aes(xintercept = present_half_cone)) +
+    scale_x_continuous(breaks = c(0,20,40,60,80)) +
+    scale_colour_colorblind(labels = leg_labs)  +
+    xlab(expression("Half cone angle/"*degree)) + 
+    ylab("Difference to noise ratio") +
+    theme(legend.title = element_blank(),
+          text = element_text(size=9),
+          legend.position='top',
+          aspect.ratio = 2/(1+sqrt(5)))
+
+print(plt_CNR_diff)
+print(plt_DNR)
+```
+
+
+### Save the contrast figures
+
+```{r}
+if (save_tex) {
+    plt_signal_increase <- plt_signal_increase + labs(x = "Half cone angle/$^\\circ$")
+    tikz("C:/Users/SamLambrick/Documents/SMF_research_work/figure_making_reports/constrast-to-noise-analytic/signal_increase.tex", standAlone = FALSE, width = 3.287, height = 2.2)
+    print(plt_signal_increase)
+    dev.off()
+
+    plt_CNR_sig <- plt_CNR_sig + labs(x = "Half cone angle/$^\\circ$")
+    tikz("C:/Users/SamLambrick/Documents/SMF_research_work/figure_making_reports/constrast-to-noise-analytic/RMS_contrast_to_noise.tex", standAlone = FALSE, width = 3.287, height = 4)
+    print(plt_CNR_sig)
+    dev.off()
+}
+```
+
+# Pumping
+
+We consider the pumping back out of the detector aperture. The back pumping can
+either be modelled as an orifice,
+$$
+C_O = 11.6FA
+$$
+or as a cone
+$$
+C_A = \frac{4}{3}\pi V_m\frac{R_0^2\,R_k^2\,k}{(R_0 + R_k)L}
+$$
+$$
+	\gamma = \frac{C_A}{C_R} = 1 + \frac{16}{3}k\,\tan\alpha
+$$
+where it is $C_R$ that is of current interest.
+
+To calculate the conductance of the cone some parameters are used. These are the standard parameters for the Cambridge SHeM. 
+ - $L$, the length of the cone to the stagnation region. 14mm in 'new chamber' configuration.
+ - $R_k$, the radius of the large end of the cone. ???
+
+We must also be able to calculate the other two .
+
+`df_contrast` contains information on the equivalent signal increase for 
+different values of beta. Create an interpolation function for that to calculate
+the signal increase 
+
+
+```{r}
+# Pumping ratios giving effect on signal.
+p <- function(Cd, Cb) Cd/(Cd + Cb)
+
+# A function that gives the equivalent signal increase
+df_tmp <- df_contrast %>% filter(method == 'sigma')
+equiv_increase <- approxfun(df_tmp$beta, df_tmp$signal_increase)
+
+cone_tmp <- function(beta, working_dist) {
+    #TODO: double check this against the CAD
+    Rk <- 3.6 # For all new designs in the 'new chamber' configuration 
+    L <- 15.6 # for the 'new chamber' configuration
+    
+    R0 <- working_dist*tan(beta*pi/180)
+    alpha <- atan((Rk - R0)/L)*180/pi 
+    coneConductance(R0, Rk, L, alpha)
+}
+
+# Data frame
+df_pumping <- tibble(beta = rep(seq(0,45), times = length(working_dists)),
+                    working_dist = rep(working_dists, each = length(seq(0,45))))
+
+
+# Calculate the pumping for the two methods 
+df_pumping %<>% mutate(aperture = apertureConductance(beta, working_dist))
+df_pumping %<>% mutate(cone = cone_tmp(beta, working_dist))
+
+df_pumping %>% pivot_longer(c('aperture', 'cone'), names_to="method", values_to = "conductance") %>%
+  filter(working_dist == 0.5) %>%
+  ggplot(aes(x = beta, y = conductance, colour = method)) +
+  geom_line()
+
+#TODO: I think the cone formula breaks down at some point.... check it
+#TODO: the units are completely off too.....
+```
+```{r}
+# Pumping conductances for the two methods
+df_3 <- df_pumping %>% filter(working_dist > 2.99 & working_dist < 3.01)
+df_1 <- df_pumping %>% filter(working_dist > 0.99 & working_dist < 1.01)
+```
+
+Consider the ratio of pumping in a more abstract way.
+
+```{r}
+
+Cb <- seq(0.01, 3, by=0.01)
+df <- tibble(Cb = Cb, Cd=1)
+df %<>% mutate(p = p(Cd, Cb))
+
+df %>% ggplot(aes(x=Cb, y=p)) + 
+  geom_line() + 
+  ylim(0, 1) + 
+  labs(x='C_b/C_d', y='Proportion of siganl detected') 
 ```
 
 ```{r}
-# Plot of the contrast to noise with the pumping taken into account
-#facet_names <- c(
-#    'CNR_sigma'="RMS contrast to noise",
-#    'sigma'="Standard deviation"
+# TODO: this uses a different definition of sigma_calc()...     
+# Calculate the standard deviation and the RMS contrast to noise
+#df_pumping %<>% mutate(
+#     sigma = df_contrast %>% sigma_calc(beta),
+#     av = df_contrast %>% av_calc(beta)
 #)
-#plt_CNR_pumping <- df_pumping %>%
-#    filter(working_dist == 3) %>%
-#    gather(key = "variable", value = "value", -beta, -av, -signal_increase) %>%
-#    ggplot(aes(x = beta, y = value)) +
-#    geom_line(colour = colorRampPalette(solarized_pal()(8))(1)) + 
-#    geom_vline(aes(xintercept = present_half_cone)) +
-#    scale_x_continuous(breaks = c(0,20,40,60,80)) +
-#    facet_wrap( ~ variable, ncol = 2, scale = "free_y", labeller = as_labeller(facet_names)) +
-#    xlab(expression("Half cone angle/"*degree)) + 
-#    ylab(NULL) +
-#    theme(aspect.ratio = 2/(1+sqrt(5)))
+#df_pumping %<>% mutate(
+#     sigma = sigma*pump_ion/(pump_ion + pumping),
+#     av = av*pump_ion/(pump_ion + pumping),
+#     CNR_sigma = sigma/sqrt(av)
+#)
+ 
+# Normalise such that a value of 1 is the present aperture size
+#N <- (df_pumping %>% filter(beta == present_half_cone, 
+#     abs(working_dist - present_working_dist) < 0.0001))[["CNR_sigma"]]
+#df_pumping %<>% mutate(CNR_sigma = CNR_sigma/N)
+ 
+# Add the equivalent signal increase
+#df_pumping %<>% mutate(signal_increase = CNR_sigma^2)
+```
 
-# # Plot the equivalent signal increase
-# plt_signal_increase_pumping <- df_pumping %>%
-#     filter(working_dist == 3) %>%
-#     ggplot(aes(x = beta, y = signal_increase)) +
-#     geom_line(colour = colorRampPalette(solarized_pal()(8))(1)) + 
-#     geom_vline(aes(xintercept = present_half_cone)) +
-#     scale_x_continuous(breaks = c(0,20,40,60,80)) +
-#     xlab(expression("Half cone angle/"*degree)) + 
-#     ylab("Equivalent overall signal increase") +
-#     theme(aspect.ratio = 2/(1+sqrt(5)))
-# 
-#     
-# # Remove the NaNs for plotting
-# df_pumping[is.na(df_pumping)] <- 0
-# 
-# # Plot of the signal improvment as a function of both half cone angle and the
-# # working distance.
-# plt_contour_pumping <- df_pumping %>%
-#     ggplot(aes(x = beta, y = working_dist)) +
-#     geom_raster(aes(fill = signal_increase), interpolate = TRUE) +
-# #    geom_contour(aes(z = signal_increase), colour = "white", size = 0.5, binwidth=1) +
-#     geom_vline(aes(xintercept = present_half_cone), colour = "firebrick1") +
-#     geom_hline(aes(yintercept = present_working_dist), colour = "firebrick1") +
-#     scale_fill_viridis() +
-#     coord_cartesian(expand = FALSE) + 
-#     xlab(expression("Half cone angle/"*degree)) + 
-#     ylab(expression("Working distance/mm")) +
-#     labs(fill = "Equivalent signal\nincrease")
-# 
-# # Plot of the RMS CNR as a function of both half cone angle and the
-# # working distance.
-# plt_contour_pumpingCNR <- df_pumping %>%
-#     ggplot(aes(x = beta, y = working_dist)) +
-#     geom_raster(aes(fill = CNR_sigma), interpolate = TRUE) +
-#     geom_contour(aes(z = CNR_sigma), colour = "white", size = 0.5, binwidth=1) +
-#     geom_vline(aes(xintercept = present_half_cone), colour = "firebrick1") +
-#     geom_hline(aes(yintercept = present_working_dist), colour = "firebrick1") +
-#     scale_fill_viridis() +
-#     coord_cartesian(expand = FALSE) + 
-#     xlab(expression("Half cone angle/"*degree)) + 
-#     ylab(expression("Working distance/mm")) +
-#     labs(fill = "CNR")
+
+```{r}
+leg_labs <- list(
+    "0$^\\circ$,45$^\\circ$", 
+    "0$^\\circ$,90$^\\circ$",
+    "45$^\\circ$,90$^\\circ$"
+)
+
+plt_DNR <- plt_DNR + scale_colour_colorblind(labels = leg_labs) + 
+  labs(x = "Half cone angle/$^\\circ$")
+tikz("C:/Users/SamLambrick/Documents/SMF_research_work/figure_making_reports/constrast-to-noise-analytic/difference_to_noise.tex", standAlone = FALSE, width = 3.287, height = 2.8)
+print(plt_DNR)
+dev.off()
+```
+
+
+```{r}
+# Plot of the contrast to noise with the pumping taken into account
+facet_names <- c(
+    'CNR_sigma'="RMS contrast to noise",
+    'sigma'="Standard deviation"
+)
+plt_CNR_pumping <- df_pumping %>%
+    filter(working_dist == 3) %>%
+    gather(key = "variable", value = "value", -beta, -av, -signal_increase) %>%
+    ggplot(aes(x = beta, y = value)) +
+    geom_line(colour = colorRampPalette(solarized_pal()(8))(1)) + 
+    geom_vline(aes(xintercept = present_half_cone)) +
+    scale_x_continuous(breaks = c(0,20,40,60,80)) +
+    facet_wrap( ~ variable, ncol = 2, scale = "free_y", labeller = as_labeller(facet_names)) +
+    xlab(expression("Half cone angle/"*degree)) + 
+    ylab(NULL) +
+    theme(aspect.ratio = 2/(1+sqrt(5)))
+
+# Plot the equivalent signal increase
+plt_signal_increase_pumping <- df_pumping %>%
+     filter(working_dist == 3) %>%
+     ggplot(aes(x = beta, y = signal_increase)) +
+     geom_line(colour = colorRampPalette(solarized_pal()(8))(1)) + 
+     geom_vline(aes(xintercept = present_half_cone)) +
+     scale_x_continuous(breaks = c(0,20,40,60,80)) +
+     xlab(expression("Half cone angle/"*degree)) + 
+     ylab("Equivalent overall signal increase") +
+     theme(aspect.ratio = 2/(1+sqrt(5)))
+ 
+     
+# Remove the NaNs for plotting
+df_pumping[is.na(df_pumping)] <- 0
+ 
+# Plot of the signal improvment as a function of both half cone angle and the
+# working distance.
+plt_contour_pumping <- df_pumping %>%
+     ggplot(aes(x = beta, y = working_dist)) +
+     geom_raster(aes(fill = signal_increase), interpolate = TRUE) +
+    geom_contour(aes(z = signal_increase), colour = "white", size = 0.5, binwidth=1) +
+     geom_vline(aes(xintercept = present_half_cone), colour = "firebrick1") +
+     geom_hline(aes(yintercept = present_working_dist), colour = "firebrick1") +
+     scale_fill_viridis() +
+     coord_cartesian(expand = FALSE) + 
+     xlab(expression("Half cone angle/"*degree)) + 
+     ylab(expression("Working distance/mm")) +
+     labs(fill = "Equivalent signal\nincrease")
+ 
+# Plot of the RMS CNR as a function of both half cone angle and the
+# working distance.
+ plt_contour_pumpingCNR <- df_pumping %>%
+     ggplot(aes(x = beta, y = working_dist)) +
+     geom_raster(aes(fill = CNR_sigma), interpolate = TRUE) +
+     geom_contour(aes(z = CNR_sigma), colour = "white", size = 0.5, binwidth=1) +
+     geom_vline(aes(xintercept = present_half_cone), colour = "firebrick1") +
+     geom_hline(aes(yintercept = present_working_dist), colour = "firebrick1") +
+     scale_fill_viridis() +
+     coord_cartesian(expand = FALSE) + 
+     xlab(expression("Half cone angle/"*degree)) + 
+     ylab(expression("Working distance/mm")) +
+     labs(fill = "CNR")
 ```
 
 
